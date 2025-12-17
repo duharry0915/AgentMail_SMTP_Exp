@@ -391,7 +391,7 @@ async function onData(
     Logger.info('Email sent successfully', {
       sessionId: session.id,
       messageId: result.message_id,
-      apiStatus: result.status
+      threadId: result.thread_id
     });
 
     // Complete the DATA phase

@@ -28,16 +28,17 @@ import Logger from '../utils/logger';
 // ============================================================================
 
 /**
- * inbox_id format: inb_ + 12-32 alphanumeric characters
- * Example: inb_valid1234567890
+ * inbox_id format:
+ * - Legacy: inb_ + 12-32 alphanumeric characters (e.g., inb_valid1234567890)
+ * - Current: email address format (e.g., jollyboat16@agentmail.to)
  */
-const INBOX_ID_REGEX = /^inb_[a-zA-Z0-9]{12,32}$/;
+const INBOX_ID_REGEX = /^(inb_[a-zA-Z0-9]{12,32}|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/;
 
 /**
- * API key format: am_ + 32-64 alphanumeric characters
- * Example: am_validkey12345678901234567890123456
+ * API key format: am_ + 32-128 hex/alphanumeric characters
+ * Example: am_2ae75eca77d883a192f960a6c4c697e1f91b3769f20d0530217868710140d9ea
  */
-const API_KEY_REGEX = /^am_[a-zA-Z0-9]{32,64}$/;
+const API_KEY_REGEX = /^am_[a-zA-Z0-9]{32,128}$/;
 
 // ============================================================================
 // FORMAT VALIDATORS

@@ -6,7 +6,13 @@
  * - API Keys (api-key-table)
  *
  * This allows demonstrating all auth scenarios without actual database.
+ *
+ * Real credentials can be configured via .env file:
+ * - AGENTMAIL_API_KEY: Real API key for production testing
+ * - AGENTMAIL_ORG_ID: Organization ID for the API key
  */
+
+import { config } from '../config';
 
 // ============================================================================
 // MOCK DATA TYPES
@@ -44,6 +50,36 @@ export interface MockApiKey {
  * - inb_suspended78901234: Suspended inbox in org_abc
  */
 export const MOCK_INBOXES: Record<string, MockInbox> = {
+  // ─────────────────────────────────────────────────────────────────────────
+  // REAL AGENTMAIL INBOXES (for production testing)
+  // ─────────────────────────────────────────────────────────────────────────
+  'jollyboat16@agentmail.to': {
+    inbox_id: 'jollyboat16@agentmail.to',
+    email_address: 'jollyboat16@agentmail.to',
+    organization_id: '86afd95b-0e4c-55d5-937b-4f7bc9466e43',
+    status: 'active',
+    display_name: 'AgentMail',
+    created_at: '2025-11-04T20:53:02.117Z'
+  },
+  'finetruck610@agentmail.to': {
+    inbox_id: 'finetruck610@agentmail.to',
+    email_address: 'finetruck610@agentmail.to',
+    organization_id: '86afd95b-0e4c-55d5-937b-4f7bc9466e43',
+    status: 'active',
+    display_name: 'AgentMail',
+    created_at: '2025-11-04T20:56:50.064Z'
+  },
+  'anxiousstage19@agentmail.to': {
+    inbox_id: 'anxiousstage19@agentmail.to',
+    email_address: 'anxiousstage19@agentmail.to',
+    organization_id: '86afd95b-0e4c-55d5-937b-4f7bc9466e43',
+    status: 'active',
+    display_name: 'AgentMail',
+    created_at: '2025-11-04T20:54:04.970Z'
+  },
+  // ─────────────────────────────────────────────────────────────────────────
+  // MOCK INBOXES (for testing error scenarios)
+  // ─────────────────────────────────────────────────────────────────────────
   'inb_valid1234567890': {
     inbox_id: 'inb_valid1234567890',
     email_address: 'test@agentmail.dev',
@@ -127,6 +163,45 @@ export const MOCK_API_KEYS: Record<string, MockApiKey> = {
     created_at: '2024-01-01T00:00:00Z'
   }
 };
+
+// ============================================================================
+// DYNAMIC REAL CREDENTIALS (from .env)
+// ============================================================================
+
+/**
+ * Add real API key from environment if configured
+ */
+if (config.agentmail.apiKey && config.agentmail.orgId) {
+  MOCK_API_KEYS[config.agentmail.apiKey] = {
+    api_key_id: 'key_real_from_env',
+    organization_id: config.agentmail.orgId,
+    revoked_at: null,
+    expires_at: null,
+    scopes: ['smtp:send', 'messages:read', 'messages:write'],
+    name: 'Real API Key (from .env)',
+    created_at: new Date().toISOString()
+  };
+
+  // Add real inboxes for this org
+  const realInboxes = [
+    'jollyboat16@agentmail.to',
+    'finetruck610@agentmail.to',
+    'anxiousstage19@agentmail.to',
+    'selfishvoice499@agentmail.to',
+    'exuberantinspiration261@agentmail.to'
+  ];
+
+  for (const inbox of realInboxes) {
+    MOCK_INBOXES[inbox] = {
+      inbox_id: inbox,
+      email_address: inbox,
+      organization_id: config.agentmail.orgId,
+      status: 'active',
+      display_name: 'AgentMail',
+      created_at: '2025-11-04T00:00:00Z'
+    };
+  }
+}
 
 // ============================================================================
 // MOCK DATABASE FUNCTIONS

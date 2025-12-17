@@ -15,11 +15,11 @@ import Logger from '../utils/logger';
 
 /**
  * AgentMail API success response
+ * Endpoint: POST /v0/inboxes/{inbox_id}/messages/send
  */
 export interface SendMessageResponse {
   message_id: string;
-  status: 'queued' | 'sent' | 'processing';
-  created_at: string;
+  thread_id: string;
 }
 
 /**
@@ -79,13 +79,17 @@ export class AgentMailClient {
     message: AgentMailMessage,
     apiKey: string
   ): Promise<SendMessageResponse> {
-    const endpoint = `${this.baseUrl}/v0/messages`;
+    // Correct endpoint: /v0/inboxes/{inbox_id}/messages/send
+    const endpoint = `${this.baseUrl}/v0/inboxes/${encodeURIComponent(message.inbox_id)}/messages/send`;
 
     Logger.info('Sending message to AgentMail API', {
       endpoint,
       inbox_id: message.inbox_id,
       recipientCount: message.to.length
     });
+
+    // Build request body (without inbox_id - it's in the URL path)
+    const { inbox_id, ...requestBody } = message;
 
     try {
       const controller = new AbortController();
@@ -97,7 +101,7 @@ export class AgentMailClient {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(message),
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       });
 
@@ -117,7 +121,7 @@ export class AgentMailClient {
 
         Logger.error('AgentMail API error', {
           status: response.status,
-          error: errorBody
+          error: JSON.stringify(errorBody)
         });
 
         const smtpError = mapHttpToSmtp(response.status);
@@ -128,7 +132,7 @@ export class AgentMailClient {
 
       Logger.info('AgentMail API success', {
         message_id: result.message_id,
-        status: result.status
+        thread_id: result.thread_id
       });
 
       return result;

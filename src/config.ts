@@ -16,5 +16,7 @@ export const config = {
   agentmail: {
     apiBaseUrl: process.env.AGENTMAIL_API_URL || 'https://api.agentmail.to',
     timeout: parseInt(process.env.AGENTMAIL_TIMEOUT || '30000'),
+    apiKey: process.env.AGENTMAIL_API_KEY || '',
+    orgId: process.env.AGENTMAIL_ORG_ID || '',
   }
 };
