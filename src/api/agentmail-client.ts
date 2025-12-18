@@ -1,36 +1,15 @@
 /**
  * AgentMail API Client
  *
- * HTTP client for sending emails through AgentMail API.
+ * SDK wrapper for sending emails through AgentMail API.
  * Includes proper error handling with HTTP→SMTP error mapping.
  */
 
+import { AgentMailClient as SDKClient, AgentMailError, AgentMailTimeoutError } from 'agentmail';
+import type { AgentMail } from 'agentmail';
+import type { TransformedMessage } from '../email/transformer';
 import { mapHttpToSmtp, SMTPErrorResult } from '../errors/http-to-smtp-mapping';
-import { AgentMailMessage } from '../email/transformer';
 import Logger from '../utils/logger';
-
-// ============================================================================
-// INTERFACES
-// ============================================================================
-
-/**
- * AgentMail API success response
- * Endpoint: POST /v0/inboxes/{inbox_id}/messages/send
- */
-export interface SendMessageResponse {
-  message_id: string;
-  thread_id: string;
-}
-
-/**
- * AgentMail API error response (when HTTP 4xx/5xx)
- */
-export interface AgentMailAPIErrorResponse {
-  error: string;
-  message: string;
-  details?: Record<string, unknown>;
-  retry_after?: number;  // For rate limiting (429)
-}
 
 // ============================================================================
 // CUSTOM ERROR CLASS
@@ -39,144 +18,113 @@ export interface AgentMailAPIErrorResponse {
 /**
  * Custom error class for AgentMail API errors
  *
- * Includes HTTP status, API error body, and mapped SMTP error.
+ * Preserves HTTP status, API error body, and mapped SMTP error.
  */
-export class AgentMailAPIError extends Error {
+export class SMTPAgentMailError extends Error {
   constructor(
     public httpStatus: number,
-    public apiErrorBody: AgentMailAPIErrorResponse,
-    public smtpError: SMTPErrorResult
+    public smtpError: SMTPErrorResult,
+    public apiBody: unknown
   ) {
-    super(`AgentMail API error (HTTP ${httpStatus}): ${apiErrorBody?.message || 'Unknown error'}`);
-    this.name = 'AgentMailAPIError';
+    super(`API error ${httpStatus}: ${JSON.stringify(apiBody)}`);
+    this.name = 'SMTPAgentMailError';
   }
 }
 
 // ============================================================================
-// API CLIENT
+// SDK WRAPPER CLIENT
 // ============================================================================
 
 /**
- * AgentMail API Client
+ * AgentMail SDK Wrapper Client
  *
- * Sends messages through the AgentMail API with proper error handling.
+ * Wraps the official AgentMail SDK client with SMTP error conversion.
  */
-export class AgentMailClient {
-  constructor(
-    private baseUrl: string,
-    private timeoutMs: number = 30000
-  ) {}
+export class SMTPAgentMailClient {
+  private sdkClient: SDKClient;
+
+  constructor(apiKey: string, timeoutInSeconds: number = 30) {
+    this.sdkClient = new SDKClient({
+      apiKey,
+      timeoutInSeconds,
+      maxRetries: 2,  // SDK handles exponential backoff
+    });
+  }
 
   /**
    * Send a message through the AgentMail API
    *
-   * @param message - AgentMail message format
-   * @param apiKey - API key for authentication
+   * @param message - TransformedMessage with inbox_id
    * @returns SendMessageResponse on success
-   * @throws AgentMailAPIError on API error
+   * @throws SMTPAgentMailError on API error
    */
-  async sendMessage(
-    message: AgentMailMessage,
-    apiKey: string
-  ): Promise<SendMessageResponse> {
-    // Correct endpoint: /v0/inboxes/{inbox_id}/messages/send
-    const endpoint = `${this.baseUrl}/v0/inboxes/${encodeURIComponent(message.inbox_id)}/messages/send`;
-
-    Logger.info('Sending message to AgentMail API', {
-      endpoint,
-      inbox_id: message.inbox_id,
-      recipientCount: message.to.length
-    });
-
-    // Build request body (without inbox_id - it's in the URL path)
+  async sendMessage(message: TransformedMessage): Promise<AgentMail.SendMessageResponse> {
     const { inbox_id, ...requestBody } = message;
 
+    Logger.info('Sending message via SDK', {
+      inbox_id,
+      to: requestBody.to,
+      subject: requestBody.subject,
+    });
+
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      // SDK returns HttpResponsePromise, await gets the data directly
+      const response = await this.sdkClient.inboxes.messages.send(
+        inbox_id,
+        requestBody
+      );
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
+      Logger.info('Message sent successfully', {
+        messageId: response.messageId,
+        threadId: response.threadId,
       });
 
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        let errorBody: AgentMailAPIErrorResponse;
-
-        try {
-          errorBody = await response.json() as AgentMailAPIErrorResponse;
-        } catch {
-          errorBody = {
-            error: 'unknown',
-            message: `HTTP ${response.status}: ${response.statusText}`
-          };
-        }
-
-        Logger.error('AgentMail API error', {
-          status: response.status,
-          error: JSON.stringify(errorBody)
-        });
-
-        const smtpError = mapHttpToSmtp(response.status);
-        throw new AgentMailAPIError(response.status, errorBody, smtpError);
-      }
-
-      const result = await response.json() as SendMessageResponse;
-
-      Logger.info('AgentMail API success', {
-        message_id: result.message_id,
-        thread_id: result.thread_id
-      });
-
-      return result;
+      return response;
 
     } catch (error) {
-      // Handle timeout
-      if (error instanceof Error && error.name === 'AbortError') {
-        Logger.error('API request timeout', {
-          timeoutMs: this.timeoutMs
+      // Handle SDK timeout error
+      if (error instanceof AgentMailTimeoutError) {
+        Logger.error('SDK timeout error', {
+          message: error.message,
+          inbox_id,
+          recipients: requestBody.to,
+          subject: requestBody.subject,
         });
-        const smtpError = mapHttpToSmtp(504);  // Gateway timeout
-        throw new AgentMailAPIError(
-          504,
-          { error: 'timeout', message: 'Request timed out' },
-          smtpError
-        );
+        const smtpError = mapHttpToSmtp(504);  // Gateway Timeout
+        throw new SMTPAgentMailError(504, smtpError, { error: 'timeout' });
       }
 
-      // Re-throw AgentMailAPIError
-      if (error instanceof AgentMailAPIError) {
-        throw error;
+      // Handle SDK API errors (ValidationError, NotFoundError, MessageRejectedError all extend AgentMailError)
+      if (error instanceof AgentMailError) {
+        const httpStatus = error.statusCode || 500;
+        Logger.error('SDK API error', {
+          httpStatus,
+          errorMessage: error.message,
+          errorBody: error.body,
+          inbox_id,
+          recipients: requestBody.to,
+          subject: requestBody.subject,
+        });
+        const smtpError = mapHttpToSmtp(httpStatus);
+        throw new SMTPAgentMailError(httpStatus, smtpError, error.body);
       }
 
-      // Handle network errors
-      if (error instanceof Error) {
-        const isNetworkError =
-          error.message?.includes('fetch') ||
-          error.message?.includes('ECONNREFUSED') ||
-          error.message?.includes('ENOTFOUND') ||
-          error.message?.includes('network');
-
-        if (isNetworkError) {
-          Logger.error('Network error', { error: error.message });
-          const smtpError = mapHttpToSmtp(502);  // Bad gateway
-          throw new AgentMailAPIError(
-            502,
-            { error: 'network', message: error.message },
-            smtpError
-          );
-        }
-      }
-
-      // Unknown error - re-throw
-      throw error;
+      // Handle network/unknown errors
+      Logger.error('Unknown SDK error', {
+        error: String(error),
+        inbox_id,
+        recipients: requestBody.to,
+      });
+      const smtpError = mapHttpToSmtp(502);  // Bad Gateway
+      throw new SMTPAgentMailError(502, smtpError, { error: String(error) });
     }
   }
 }
+
+// ============================================================================
+// BACKWARD COMPATIBILITY EXPORTS
+// ============================================================================
+
+// Export with original names for backward compatibility
+export { SMTPAgentMailClient as AgentMailClient };
+export { SMTPAgentMailError as AgentMailAPIError };

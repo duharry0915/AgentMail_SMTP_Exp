@@ -23,7 +23,7 @@ import {
   ConnectionMetadata
 } from './session';
 import { config } from './config';
-import { transformToAgentMailFormat, validateAgentMailMessage } from './email/transformer';
+import { transformToAgentMailFormat, validateTransformedMessage } from './email/transformer';
 import { AgentMailClient, AgentMailAPIError } from './api/agentmail-client';
 
 // ============================================================================
@@ -32,15 +32,6 @@ import { AgentMailClient, AgentMailAPIError } from './api/agentmail-client';
 
 const PORT = config.smtp.port;
 const MAX_MESSAGE_SIZE = config.smtp.maxMessageSize;
-
-// ============================================================================
-// AGENTMAIL API CLIENT
-// ============================================================================
-
-const agentMailClient = new AgentMailClient(
-  config.agentmail.apiBaseUrl,
-  config.agentmail.timeout
-);
 
 // ============================================================================
 // SMTP SERVER HOOKS
@@ -372,7 +363,7 @@ async function onData(
     const apiMessage = transformToAgentMailFormat(parsed, smtpSession);
 
     // Validate before sending
-    validateAgentMailMessage(apiMessage);
+    validateTransformedMessage(apiMessage);
 
     // Log API call
     Logger.info('Calling AgentMail API', {
@@ -381,25 +372,28 @@ async function onData(
       messageSize: JSON.stringify(apiMessage).length
     });
 
-    // Send via API client
-    const result = await agentMailClient.sendMessage(
-      apiMessage,
-      smtpSession.user!.api_key
+    // Create SDK client with user's API key (per-request)
+    const sdkClient = new AgentMailClient(
+      smtpSession.user!.api_key,
+      Math.floor(config.agentmail.timeout / 1000)  // Convert ms to seconds
     );
+
+    // Send via SDK client
+    const result = await sdkClient.sendMessage(apiMessage);
 
     // Log success
     Logger.info('Email sent successfully', {
       sessionId: session.id,
-      messageId: result.message_id,
-      threadId: result.thread_id
+      messageId: result.messageId,
+      threadId: result.threadId
     });
 
     // Complete the DATA phase
-    sessionManager.handleDataComplete(session.id, result.message_id);
+    sessionManager.handleDataComplete(session.id, result.messageId);
 
-    Logger.smtpResponse(250, '2.0.0', `Message queued as ${result.message_id}`);
+    Logger.smtpResponse(250, '2.0.0', `Message queued as ${result.messageId}`);
 
-    callback(null, `Message queued as ${result.message_id}`);
+    callback(null, `Message queued as ${result.messageId}`);
 
   } catch (error) {
     // Handle AgentMail API errors

@@ -5,37 +5,20 @@
  */
 
 import { ParsedMail, Attachment, Headers } from 'mailparser';
+import { AgentMail } from 'agentmail';
 import { SMTPSession } from '../session/session-state';
 import Logger from '../utils/logger';
 
 // ============================================================================
-// INTERFACES
+// INTERFACES (using SDK types)
 // ============================================================================
 
 /**
- * AgentMail API message format
+ * Extended message type that includes inbox_id for internal routing.
+ * The inbox_id is removed before sending to API (it goes in URL path).
  */
-export interface AgentMailMessage {
-  inbox_id: string;
-  to: string[];
-  cc?: string[];
-  bcc?: string[];
-  subject: string;
-  text?: string;
-  html?: string;
-  attachments?: AgentMailAttachment[];
-  headers?: Record<string, string>;
-  reply_to?: string;
-}
-
-/**
- * AgentMail attachment format
- */
-export interface AgentMailAttachment {
-  filename: string;
-  content: string;          // base64
-  content_type: string;
-  size?: number;
+export interface TransformedMessage extends AgentMail.SendMessageRequest {
+  inbox_id: string;  // For internal use, not sent in body
 }
 
 // ============================================================================
@@ -61,12 +44,11 @@ function extractAddresses(
 /**
  * Transform mailparser Attachment to AgentMail format
  */
-function transformAttachment(att: Attachment): AgentMailAttachment {
+function transformAttachment(att: Attachment): AgentMail.SendAttachment {
   return {
     filename: att.filename || 'untitled',
     content: att.content.toString('base64'),  // Buffer → base64 string
-    content_type: att.contentType,
-    size: att.size
+    contentType: att.contentType,  // camelCase for SDK
   };
 }
 
@@ -99,12 +81,12 @@ function extractCustomHeaders(headers?: Headers): Record<string, string> | undef
  *
  * @param parsed - Parsed email from mailparser
  * @param session - SMTP session with authenticated user
- * @returns AgentMailMessage ready for API submission
+ * @returns TransformedMessage ready for API submission
  */
 export function transformToAgentMailFormat(
   parsed: ParsedMail,
   session: SMTPSession
-): AgentMailMessage {
+): TransformedMessage {
   Logger.info('Transforming email', {
     from: parsed.from?.text,
     to: parsed.to ? extractAddresses(parsed.to).join(', ') : 'none',
@@ -114,7 +96,7 @@ export function transformToAgentMailFormat(
     attachmentCount: parsed.attachments?.length || 0
   });
 
-  const message: AgentMailMessage = {
+  const message: TransformedMessage = {
     inbox_id: session.user!.inbox_id,
     to: extractAddresses(parsed.to),
     subject: parsed.subject || '(no subject)',
@@ -143,9 +125,9 @@ export function transformToAgentMailFormat(
     message.attachments = parsed.attachments.map(transformAttachment);
   }
 
-  const replyTo = extractAddresses(parsed.replyTo);
-  if (replyTo.length > 0) {
-    message.reply_to = replyTo[0];
+  const replyToAddrs = extractAddresses(parsed.replyTo);
+  if (replyToAddrs.length > 0) {
+    message.replyTo = replyToAddrs;  // camelCase for SDK, array format
   }
 
   const customHeaders = extractCustomHeaders(parsed.headers);
@@ -164,42 +146,50 @@ export function transformToAgentMailFormat(
  * Validate transformed message before sending to API
  * @throws Error if validation fails
  */
-export function validateAgentMailMessage(message: AgentMailMessage): void {
+export function validateTransformedMessage(message: TransformedMessage): void {
   if (!message.inbox_id) {
     throw new Error('inbox_id is required');
   }
 
-  if (!message.to || message.to.length === 0) {
+  // SDK to field can be string | string[] | undefined
+  const toAddresses = normalizeAddresses(message.to);
+  if (toAddresses.length === 0) {
     throw new Error('At least one recipient (to) is required');
   }
 
   // Validate email format
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  for (const email of message.to) {
+  for (const email of toAddresses) {
     if (!emailRegex.test(email)) {
       throw new Error(`Invalid email address: ${email}`);
     }
   }
 
-  if (message.cc) {
-    for (const email of message.cc) {
-      if (!emailRegex.test(email)) {
-        throw new Error(`Invalid CC email address: ${email}`);
-      }
+  const ccAddresses = normalizeAddresses(message.cc);
+  for (const email of ccAddresses) {
+    if (!emailRegex.test(email)) {
+      throw new Error(`Invalid CC email address: ${email}`);
     }
   }
 
-  if (message.bcc) {
-    for (const email of message.bcc) {
-      if (!emailRegex.test(email)) {
-        throw new Error(`Invalid BCC email address: ${email}`);
-      }
+  const bccAddresses = normalizeAddresses(message.bcc);
+  for (const email of bccAddresses) {
+    if (!emailRegex.test(email)) {
+      throw new Error(`Invalid BCC email address: ${email}`);
     }
   }
 
   Logger.info('Message validation passed', {
     inbox_id: message.inbox_id,
-    recipientCount: message.to.length + (message.cc?.length || 0) + (message.bcc?.length || 0)
+    recipientCount: toAddresses.length + ccAddresses.length + bccAddresses.length
   });
+}
+
+/**
+ * Normalize addresses from SDK format (string | string[] | undefined) to string[]
+ */
+function normalizeAddresses(addresses: string | string[] | undefined): string[] {
+  if (!addresses) return [];
+  return Array.isArray(addresses) ? addresses : [addresses];
 }

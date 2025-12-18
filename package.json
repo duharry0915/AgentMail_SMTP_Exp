@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "agentmail": "file:../agentmail-node",
     "dotenv": "^17.2.3",
     "mailparser": "^3.7.1",
     "smtp-server": "^3.13.0"

@@ -197,6 +197,71 @@ test_11() {
         --body "Automated test email"
 }
 
+test_12() {
+    run_test "12. Send HTML email" "250" \
+        --server "$SERVER" \
+        --auth PLAIN \
+        --auth-user "$VALID_INBOX" \
+        --auth-password "$VALID_API_KEY" \
+        --to "$VALID_INBOX" \
+        --from "$VALID_INBOX" \
+        --header "Subject: HTML Test $(date +%s)" \
+        --header "Content-Type: text/html" \
+        --body "<html><body><h1>Hello</h1><p>This is an <b>HTML</b> email.</p></body></html>"
+}
+
+test_13() {
+    run_test "13. Send email with CC" "250" \
+        --server "$SERVER" \
+        --auth PLAIN \
+        --auth-user "$VALID_INBOX" \
+        --auth-password "$VALID_API_KEY" \
+        --to "$VALID_INBOX" \
+        --from "$VALID_INBOX" \
+        --header "Subject: CC Test $(date +%s)" \
+        --header "Cc: $VALID_INBOX" \
+        --body "Email with CC recipient"
+}
+
+test_14() {
+    run_test "14. Send email with attachment" "250" \
+        --server "$SERVER" \
+        --auth PLAIN \
+        --auth-user "$VALID_INBOX" \
+        --auth-password "$VALID_API_KEY" \
+        --to "$VALID_INBOX" \
+        --from "$VALID_INBOX" \
+        --header "Subject: Attachment Test $(date +%s)" \
+        --attach-type text/plain \
+        --attach-name "test.txt" \
+        --attach-body "This is a test attachment content."
+}
+
+test_15() {
+    run_test "15. Send email with Reply-To header" "250" \
+        --server "$SERVER" \
+        --auth PLAIN \
+        --auth-user "$VALID_INBOX" \
+        --auth-password "$VALID_API_KEY" \
+        --to "$VALID_INBOX" \
+        --from "$VALID_INBOX" \
+        --header "Subject: Reply-To Test $(date +%s)" \
+        --header "Reply-To: reply@example.com" \
+        --body "Email with Reply-To header"
+}
+
+test_16() {
+    run_test "16. Send email with long body" "250" \
+        --server "$SERVER" \
+        --auth PLAIN \
+        --auth-user "$VALID_INBOX" \
+        --auth-password "$VALID_API_KEY" \
+        --to "$VALID_INBOX" \
+        --from "$VALID_INBOX" \
+        --header "Subject: Long Body Test $(date +%s)" \
+        --body "$(printf 'This is line %d of the email body.\n' {1..100})"
+}
+
 # =============================================================================
 # List Tests
 # =============================================================================
@@ -220,13 +285,18 @@ list_tests() {
     echo "    9  - Insufficient permissions (expect 535)"
     echo "    10 - Disabled inbox (expect 535)"
     echo ""
-    echo "  Send Tests (11):"
-    echo "    11 - Send email to AgentMail inbox (expect 250)"
+    echo "  Send Tests (11-16):"
+    echo "    11 - Send basic email (expect 250)"
+    echo "    12 - Send HTML email (expect 250)"
+    echo "    13 - Send email with CC (expect 250)"
+    echo "    14 - Send email with attachment (expect 250)"
+    echo "    15 - Send email with Reply-To (expect 250)"
+    echo "    16 - Send email with long body (expect 250)"
     echo ""
     echo "Groups:"
     echo "  auth - Run tests 1-5"
     echo "  mock - Run tests 6-10"
-    echo "  send - Run test 11"
+    echo "  send - Run tests 11-16"
     echo "  all  - Run all tests (default)"
     echo ""
 }
@@ -249,6 +319,11 @@ run_tests() {
             9)  test_9 ;;
             10) test_10 ;;
             11) test_11 ;;
+            12) test_12 ;;
+            13) test_13 ;;
+            14) test_14 ;;
+            15) test_15 ;;
+            16) test_16 ;;
             *)  echo -e "${RED}Unknown test: $test_num${NC}" ;;
         esac
     done
@@ -262,7 +337,7 @@ run_all() {
     test_6; test_7; test_8; test_9; test_10
 
     print_header "Email Sending Tests"
-    test_11
+    test_11; test_12; test_13; test_14; test_15; test_16
 }
 
 print_summary() {
@@ -317,7 +392,7 @@ case "${1:-}" in
     send)
         check_server
         print_header "Email Sending Tests"
-        run_tests 11
+        run_tests 11 12 13 14 15 16
         print_summary
         ;;
     *)
